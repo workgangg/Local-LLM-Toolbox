@@ -12,6 +12,13 @@ Self-contained local LLM environment running Ollama + OpenCode + an agent API in
 - **Telegram Bridge** — Sandboxed Telegram-to-agent-api bridge (inert by default, behind a compose profile)
 - **Models** — Gemma 4 E4B and GRM-2.5 4B (loaded automatically on first start; GRM-2.5 is pulled pre-quantized as a ~2.4 GB GGUF, not the full ~9 GB weights)
 
+## Documentation
+
+- **[SETUP.txt](SETUP.txt)** — Full installation walkthrough. Prerequisites, GPU setup (Windows/WSL2 + Linux), Fedora / RHEL / Podman notes, WSL memory tuning, troubleshooting, resource management, and the Telegram-bridge security checklist. Start here if you're setting up for the first time.
+- **[GUIDE.md](GUIDE.md)** — Deep dive on the LocalAgent system: the agent-api, how presets are structured, how the tools (`read_file`, `web_fetch`, `run_command`, etc.) are wired up, and how to write your own preset.
+- **[COLLEGE_USE_CASES.md](COLLEGE_USE_CASES.md)** — Worked examples for students: turning lecture notes into study guides, drafting essays, programming homework with `coder`, ranking job listings with `job-scanner`, synthesizing literature reviews, and more. A good place to land if you want concrete things to try.
+- **[CLAUDE.md](CLAUDE.md)** — Context file that Claude-based tools read automatically when they open the project folder. You don't usually read this directly.
+
 ## Quick Start
 
 ### Prerequisites
