@@ -1,0 +1,54 @@
+# criteria.md — example scaffold for job-scanner
+
+# HOW TO USE
+#
+#   cp criteria.md.example criteria.md
+#
+# Then edit the copy (criteria.md is .gitignore-safe by convention —
+# your preferences shouldn't live in source control).
+#
+# The `job-scanner` preset reads this file automatically and uses
+# it to score listings 1-10 before writing a ranked report. The
+# more specific you are here, the better the scoring.
+
+
+## Role
+
+- Target roles: <e.g., SWE intern, data analyst intern, ML engineer>
+- Seniority: <entry / intern / new-grad / mid-level / senior>
+- Must-have skills: <e.g., Python, SQL, Go, React>
+- Nice-to-have skills: <e.g., Kubernetes, TypeScript, Rust>
+
+
+## Location + logistics
+
+- Work arrangement: <remote / hybrid / in-office>
+- Acceptable regions: <e.g., US Pacific NW, EU, anywhere>
+- Timezone overlap needed: <e.g., must include 9am-12pm PT>
+- Relocation: <yes / no / only for <city>>
+- Start date / duration: <e.g., Summer 2026, ~12 weeks>
+
+
+## Compensation
+
+- Minimum salary: <$X or "no preference">
+- Equity: <required / nice-to-have / no preference>
+- Benefits that matter: <e.g., health insurance, 401k match, learning stipend>
+
+
+## Dealbreakers  (score 1 automatically if any apply)
+
+- Unpaid or "equity only"
+- On-call rotation
+- Requires security clearance I don't have
+- Customer-facing sales role
+- <add your own>
+
+
+## Preferences  (nice-to-have signals)
+
+- Small team (<50 people)
+- Open-source or public work as part of the role
+- Documented engineering practices (code review, testing)
+- Clear promotion path
+- <add your own>

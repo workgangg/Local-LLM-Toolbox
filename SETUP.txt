@@ -1,0 +1,905 @@
+=====================================================================
+  Local LLM Toolbox  --  Ollama + OpenCode + Agent API in Docker
+  Setup Guide
+=====================================================================
+
+Welcome! This guide will walk you through getting your local LLM
+environment up and running. No prior Docker experience is required.
+
+
+---------------------------------------------------------------------
+  WHAT'S IN THE BOX
+---------------------------------------------------------------------
+
+The stack runs seven services inside Docker. Some come up
+automatically, others launch on demand or behind a profile flag.
+
+  ALWAYS-ON
+
+  1. Ollama            Local LLM inference server. Loads model
+                       weights into memory and serves them over HTTP
+                       on port 11434. GPU-accelerated when possible.
+
+  2. Model Loader      One-shot init container that pulls the default
+                       models on first startup. Subsequent starts
+                       detect existing models and skip the download.
+
+  3. Agent API         HTTP service on port 3777 that dispatches
+                       agent presets (see localagent/presets/) to
+                       Ollama. Used by OpenCode, the Telegram bridge,
+                       and any custom scripts. See GUIDE.md for the
+                       preset system.
+
+  4. Open WebUI        Browser-based ChatGPT-style chat UI at
+                       http://localhost:3000. Good for quick
+                       conversational use of your local models.
+
+  ON DEMAND
+
+  5. OpenCode CLI      Interactive AI coding agent (terminal UI).
+                       Launch with `docker compose run --rm opencode`.
+                       Your ./projects folder is mounted inside.
+
+  6. Graphify          Turns a folder of code, docs, or notes into a
+                       queryable knowledge graph. Launch with
+                       `docker compose run --rm graphify <cmd>`.
+
+  BEHIND A PROFILE FLAG (inert by default)
+
+  7. Telegram Bridge   Sandboxed bridge that forwards Telegram
+                       messages to the agent-api. Shipped disabled
+                       behind the `telegram` compose profile. Read
+                       telegram-bridge/README.md to activate, and
+                       the SECURITY section at the bottom of this
+                       guide before exposing anything.
+
+Two models are loaded automatically the first time you start up:
+
+  - Gemma 4 E4B   (pulled from Ollama registry)
+  - GRM-2.5 4B    (imported from HuggingFace, quantized to q4_K_M)
+
+  NOTE: GRM-2.5 is pulled from HuggingFace as a pre-quantized GGUF
+  (i1-Q4_K_M imatrix, ~2.4 GB) and imported into Ollama on first
+  startup. No local quantization pass is needed, so the whole thing
+  usually takes 2-5 minutes on a decent connection. Subsequent
+  starts skip this entirely.
+
+
+---------------------------------------------------------------------
+  PREREQUISITES
+---------------------------------------------------------------------
+
+You need the following installed before you begin:
+
+  1. Docker Desktop (or Docker Engine + Docker Compose v2)
+     https://docs.docker.com/get-docker/
+
+     After installing, make sure Docker is running. You can verify
+     by opening a terminal and typing:
+
+         docker --version
+
+     You should see something like "Docker version 27.x.x".
+
+  2. (Optional but recommended) NVIDIA GPU support
+
+     If you have an NVIDIA graphics card, you can let Ollama use it
+     for much faster inference. This requires TWO things:
+
+       a. Up-to-date NVIDIA GPU drivers (on Windows)
+          https://www.nvidia.com/Download/index.aspx
+
+          Open PowerShell or CMD and run:
+
+              nvidia-smi
+
+          If you see a table with your GPU listed, your driver is good.
+          If not, download and install the latest Game Ready or Studio
+          driver from the link above.
+
+       b. NVIDIA Container Toolkit (inside WSL2)
+
+          IMPORTANT: This is the step most people miss. The toolkit
+          must be installed INSIDE your WSL2 Linux environment, not
+          on Windows itself. Without it, Docker silently falls back
+          to CPU -- everything will appear to work, but your GPU
+          won't actually be used.
+
+          Open a WSL2 terminal (run "wsl" from PowerShell) and run
+          these commands ONE AT A TIME. Copy each line individually
+          -- do NOT select the whole block at once, or line wrapping
+          will break the commands.
+
+          Command 1 -- download the GPG key:
+
+              curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+          Command 2 -- add the package repository:
+
+              curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+          Command 3 -- install the toolkit:
+
+              sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+
+          Command 4 -- configure Docker to use it:
+
+              sudo nvidia-ctk runtime configure --runtime=docker
+
+          After installing, RESTART Docker Desktop.
+
+     To verify the full chain is working, run:
+
+         docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+
+     If you see a table with your GPU listed, you're good to go.
+
+     If it fails, go back and make sure BOTH steps (a) and (b) are
+     done. The most common failure is skipping the WSL2 toolkit
+     install -- your Windows driver alone is not enough.
+
+     DON'T HAVE AN NVIDIA GPU? No problem -- everything runs on CPU
+     by default. See "GPU Mode" below if you DO have one.
+
+
+---------------------------------------------------------------------
+  WINDOWS USERS -- WSL MEMORY TUNING
+---------------------------------------------------------------------
+
+Docker Desktop on Windows runs inside WSL2, which allocates RAM
+eagerly but rarely gives it back. Without a cap, WSL will consume
+up to 50% of your system memory and hold onto it even when idle.
+
+Create (or edit) the file at:
+
+    C:\Users\<YourUsername>\.wslconfig
+
+Add the following:
+
+    [wsl2]
+    memory=2GB
+
+Save the file, then restart WSL from PowerShell:
+
+    wsl --shutdown
+
+The next time Docker Desktop starts, WSL will be capped at 2 GB.
+Adjust the value to suit your machine -- 2 GB is a good starting
+point for the models included here. If you add larger models later,
+you may want to increase it.
+
+To reclaim disk space after cleaning up unused Docker images or
+containers, you can compact the WSL virtual disk from PowerShell:
+
+    wsl --shutdown
+    Optimize-VHD -Path "$env:LOCALAPPDATA\Packages\<DistroFolder>\LocalState\ext4.vhdx" -Mode Full
+
+If you don't have Hyper-V tools, use diskpart instead:
+
+    wsl --shutdown
+    diskpart
+    select vdisk file="<full path to ext4.vhdx>"
+    compact vdisk
+    exit
+
+
+---------------------------------------------------------------------
+  LINUX USERS -- DISTRO NOTES
+---------------------------------------------------------------------
+
+Docker on Linux varies by distribution. If `docker compose up -d`
+fails on first try, it is almost always one of the following:
+
+  - `docker` is not installed (your distro ships Podman instead).
+  - The Compose v2 plugin is missing (you only have the legacy
+    `docker-compose` command with a hyphen).
+  - SELinux is blocking the bind mounts (Fedora, RHEL, Rocky,
+    AlmaLinux, openSUSE).
+
+This compose file already carries `:z` SELinux relabel hints on every
+bind mount, so the third issue is handled automatically. The first
+two depend on which distro you are on.
+
+
+  FEDORA / RHEL / ROCKY / ALMALINUX
+
+  Fedora ships Podman as the default container runtime. The `docker`
+  command may not exist at all. You have two paths — pick one.
+
+  Path A — install Docker CE from Docker's official repo (recommended
+  for first-time users, matches every command in this guide verbatim):
+
+      sudo dnf -y install dnf-plugins-core
+      sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+      sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      sudo systemctl enable --now docker
+      sudo usermod -aG docker "$USER"
+      newgrp docker    # or log out and back in
+
+  Verify with:
+
+      docker compose version
+
+  Path B — use Podman with the docker shim (keeps you on Fedora's
+  default stack, no third-party repo required):
+
+      sudo dnf -y install podman podman-docker podman-compose
+      systemctl --user enable --now podman.socket
+
+  The `podman-docker` package provides a `docker` command that just
+  calls Podman under the hood, so every command in this guide works
+  unchanged. Caveat: `podman compose` and `podman-compose` have a few
+  compatibility gaps with `docker compose`; if something behaves
+  strangely, try Path A before assuming the stack is broken.
+
+  SELinux: already handled by the `:z` mount flags in the compose
+  file. You do NOT need to run `setenforce 0` or edit policies.
+
+  GPU on Fedora: use the `nvidia-container-toolkit` package from
+  NVIDIA's official repo, then `sudo nvidia-ctk runtime configure
+  --runtime=docker` (or `--runtime=crun` for Podman). Same as the
+  WSL2 instructions above, minus the WSL2 parts.
+
+
+  DEBIAN / UBUNTU
+
+  Usually works out of the box, but verify you have Compose v2
+  (the plugin, space-separated) rather than the legacy hyphenated
+  `docker-compose`:
+
+      docker compose version
+
+  If that fails, install the plugin:
+
+      sudo apt-get update
+      sudo apt-get install docker-compose-plugin
+
+
+  ARCH / MANJARO
+
+      sudo pacman -S docker docker-compose
+      sudo systemctl enable --now docker.service
+      sudo usermod -aG docker "$USER"
+
+  (Log out and back in to pick up the docker group.)
+
+
+  TROUBLESHOOTING SELINUX-SPECIFIC FAILURES
+
+  If you see "permission denied" from inside a container trying to
+  read /workspace/projects, and you're on a SELinux distro, confirm
+  the relabel happened:
+
+      ls -Z projects/
+
+  You should see `container_file_t` on the files. If you see
+  `user_home_t` or `unlabeled_t` instead, the `:z` hint did not run
+  — most often because an older Docker/Podman version ignored it.
+  Force a relabel manually:
+
+      chcon -Rt container_file_t ./projects ./prompts ./telegram-bridge ./Modelfile.grm25 ./opencode.json
+
+  This is a one-time fix; subsequent `docker compose` runs will
+  maintain the labels.
+
+
+---------------------------------------------------------------------
+  GETTING STARTED  (step by step)
+---------------------------------------------------------------------
+
+Open a terminal and navigate to this folder (the one containing
+docker-compose.yml).  For example:
+
+    cd "path/to/Local LLM Toolbox"
+
+
+STEP 0 -- Generate your graph index  (first run only, ~30 seconds)
+
+  This package ships WITHOUT a pre-built graph index, because the
+  index would reflect the original author's code tree rather than
+  yours. The OpenCode agents use the index as a map of your codebase
+  when answering architecture questions — without it, they fall back
+  to raw file search, which is slower and shallower.
+
+  Requires Python 3 and graphify on the host. If you don't have it:
+
+      pip install graphifyy
+
+  Heads up on the spelling: the PyPI package is `graphifyy` (two y's)
+  but the CLI / Python module you actually run is `graphify` (one y).
+  The double-y is an intentional collision workaround — the one-y
+  name on PyPI is taken by an unrelated package, so the real tool
+  ships under the doubled-up name. Source repo:
+  https://github.com/safishamsi/graphify
+
+  Then, from this folder, run:
+
+      python -m graphify update .
+      cd projects
+      python -m graphify update .
+      cd ..
+
+  This populates ./graphify-out/ and ./projects/graphify-out/ against
+  your actual files. Re-run whenever you add or rename code under
+  projects/ to keep the map current. AST-based, offline, no API cost.
+
+  If you'd rather skip this for now, everything still works — the
+  agents just won't have the graph to navigate.
+
+
+STEP 1 -- Start the stack
+
+    docker compose up -d
+
+  This starts two services:
+    - Ollama (LLM backend, port 11434)
+    - Model Loader (pulls default models if not already present)
+
+  The first run downloads models, which may take several minutes
+  depending on your connection.
+
+  You can watch the progress with:
+
+    docker compose logs -f
+
+  Wait until you see "Model check complete." in the logs, then
+  press Ctrl+C to stop watching.
+
+
+STEP 2 -- Launch OpenCode (on demand)
+
+    docker compose run --rm opencode
+
+  This opens the interactive OpenCode terminal UI. Your projects
+  folder is mounted at /workspace/projects inside the container.
+
+  When you're done, exit OpenCode normally (type /exit or press
+  Ctrl+C) and the container cleans itself up automatically.
+
+
+STEP 3 -- Build a knowledge graph with Graphify (optional)
+
+    docker compose run --rm graphify update .
+
+  This scans the files in your projects/ folder and produces a
+  knowledge graph. Output lands in projects/graphify-out/ with:
+
+    - graph.html       Interactive visual map (open in a browser)
+    - GRAPH_REPORT.md  Summary: core nodes, surprises, suggested
+                       questions to ask
+    - graph.json       The full graph, queryable from the CLI
+
+  After building a graph, you can query it:
+
+    docker compose run --rm graphify query "how does the agent API work?"
+
+  Or find connections between two concepts:
+
+    docker compose run --rm graphify path "Node A" "Node B"
+
+  Or get a plain-language explanation of any node:
+
+    docker compose run --rm graphify explain "server.mjs"
+
+  The graph only needs to be rebuilt when your code changes. To
+  update it incrementally (faster):
+
+    docker compose run --rm graphify update .
+
+  To watch for changes and rebuild automatically:
+
+    docker compose run --rm graphify watch .
+
+
+  HOW GRAPHIFY CONNECTS TO OPENCODE
+
+  Graphify is not just a standalone tool — it is wired into OpenCode
+  so the AI agents automatically use the knowledge graph.
+
+  Once you build a graph (step above), two things happen:
+
+    1. The OpenCode plugin (.opencode/plugins/graphify.js) detects
+       graphify-out/graph.json in the working directory. On the first
+       bash tool call, it reminds the agent that a knowledge graph is
+       available and to read GRAPH_REPORT.md before searching files.
+
+    2. AGENTS.md in the projects folder tells the agent to:
+       - Read graphify-out/GRAPH_REPORT.md before answering
+         architecture or codebase questions
+       - Navigate graphify-out/wiki/ if it exists instead of reading
+         raw source files
+       - Run "graphify update ." after modifying code to keep the
+         graph current
+
+  In short: build the graph once, and OpenCode automatically uses it
+  as a map of your codebase whenever you ask about structure,
+  architecture, or how things connect.
+
+
+STEP 4 -- Shutting down
+
+  When you're finished for the day:
+
+    docker compose down
+
+  This stops and removes the containers. Your downloaded models
+  are saved in a Docker volume (ollama-models) and will still be
+  there next time.
+
+  If you ever want to delete everything and start fresh:
+
+    docker compose down -v
+
+  The -v flag removes the volumes, so models will be re-downloaded
+  on the next startup.
+
+
+---------------------------------------------------------------------
+  GPU MODE  (NVIDIA only)
+---------------------------------------------------------------------
+
+GPU acceleration is handled by a separate override file. It
+requires the NVIDIA Container Toolkit to be installed inside WSL2
+(see Prerequisites step 2b above).
+
+CRITICAL: When using GPU mode, EVERY docker compose command must
+include both -f flags. If you run ANY command without them (even
+"docker compose run --rm opencode"), Docker will recreate the
+Ollama container WITHOUT GPU access -- silently, with no error.
+Your GPU stack will be replaced by a CPU-only stack.
+
+Here is the full GPU startup sequence:
+
+
+GPU STEP 1 -- Start the stack
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+
+GPU STEP 2 -- Wait for models (first time only)
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml logs -f
+
+  Wait until you see "Model check complete." then press Ctrl+C.
+
+
+GPU STEP 3 -- Verify the GPU is being used
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec ollama nvidia-smi
+
+  You should see your GPU listed. Then check that models load on it:
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec ollama ollama ps
+
+  The PROCESSOR column should show "GPU" or a "CPU/GPU" split, NOT
+  "100% CPU". If it says 100% CPU, the toolkit is not installed
+  correctly -- go back to Prerequisites step 2b.
+
+  NOTE: If your model is larger than your available VRAM, Ollama
+  will split it across GPU and CPU (e.g. "66%/34% CPU/GPU"). This
+  is normal and still faster than 100% CPU.
+
+
+GPU STEP 4 -- Launch OpenCode
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm opencode
+
+  DO NOT run "docker compose run --rm opencode" without the -f
+  flags. That will destroy your GPU stack.
+
+
+GPU STEP 5 -- Shut down when done
+
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml down
+
+
+If you don't have a GPU, just use the normal "docker compose up -d"
+command. Ollama runs on CPU by default and works fine, especially
+with smaller models like GRM-2.5.
+
+
+---------------------------------------------------------------------
+  ARCHITECTURE OVERVIEW
+---------------------------------------------------------------------
+
+  docker-compose.yml           Main stack definition
+  docker-compose.gpu.yml       GPU override (layer on top)
+  Dockerfile                   OpenCode + agent-api + Graphify image
+  opencode.json                OpenCode provider/model config
+  localagent/                  Agent-api source + presets
+  telegram-bridge/             Optional Telegram bridge (inert by default)
+  projects/                    Your project files (mounted into
+                                 OpenCode, agent-api, and Graphify)
+  projects/graphify-out/       Knowledge graph output (after
+                                 running graphify)
+
+  Docker Volumes:
+    ollama-models              Persists downloaded LLM models
+    open-webui-data            Persists Open WebUI chats + settings
+
+  Ports (all bound to localhost only — none exposed to LAN):
+    11434                      Ollama API
+    3777                       Agent API (127.0.0.1 only; see SECURITY)
+    3000                       Open WebUI (http://localhost:3000)
+
+
+---------------------------------------------------------------------
+  RESOURCE MANAGEMENT
+---------------------------------------------------------------------
+
+Log rotation is configured on every long-running service to prevent
+unbounded disk growth:
+
+  - Ollama:           3 x 50 MB  (150 MB max)
+  - Agent API:        3 x 20 MB   (60 MB max)
+  - Open WebUI:       3 x 20 MB   (60 MB max)
+  - Telegram bridge:  3 x 20 MB   (60 MB max; only when the profile is on)
+
+Ollama is configured with OLLAMA_KEEP_ALIVE=5m, which means models
+are unloaded from RAM after 5 minutes of idle time. The next request
+(including one coming in from the Telegram bridge) reloads the model
+automatically — the first reply after idle is slower, but the bot
+never silently ignores you. Raise this if you have plenty of RAM and
+prefer instant replies to memory savings.
+
+The Model Loader checks whether each model is already present
+before pulling, so restarts don't re-download models unnecessarily.
+
+To reclaim disk space from unused Docker images and build cache:
+
+    docker system prune
+
+This is safe to run while the stack is running -- it only removes
+stopped containers, dangling images, and build cache. It will NOT
+touch your running containers or their images.
+
+Do NOT run "docker system prune -a" while the stack is stopped, as
+it will remove all unused images and force a full re-pull/rebuild
+on the next startup.
+
+
+---------------------------------------------------------------------
+  QUICK REFERENCE
+---------------------------------------------------------------------
+
+  CPU Mode:
+    Start the stack:              docker compose up -d
+    Watch startup logs:           docker compose logs -f
+    Launch OpenCode:              docker compose run --rm opencode
+    Stop everything:              docker compose down
+    Stop + delete all data:       docker compose down -v
+
+  GPU Mode (use these commands INSTEAD, not mixed with the above):
+    Start the stack:              docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+    Watch startup logs:           docker compose -f docker-compose.yml -f docker-compose.gpu.yml logs -f
+    Verify GPU:                   docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec ollama ollama ps
+    Launch OpenCode:              docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm opencode
+    Stop everything:              docker compose -f docker-compose.yml -f docker-compose.gpu.yml down
+    Stop + delete all data:       docker compose -f docker-compose.yml -f docker-compose.gpu.yml down -v
+
+  Graphify:
+    Build a knowledge graph:      docker compose run --rm graphify update .
+    Query the graph:              docker compose run --rm graphify query "your question"
+    Find connections:             docker compose run --rm graphify path "A" "B"
+    Explain a node:               docker compose run --rm graphify explain "name"
+    Watch for changes:            docker compose run --rm graphify watch .
+    Add external content:         docker compose run --rm graphify add <url>
+
+  General:
+    Pull a new model:             docker compose exec ollama ollama pull <model-name>
+    Reclaim disk space:           docker system prune
+
+
+---------------------------------------------------------------------
+  TROUBLESHOOTING
+---------------------------------------------------------------------
+
+  "docker compose" is not recognized
+  ----------------------------------
+  You may have an older version of Docker that uses "docker-compose"
+  (with a hyphen) instead of "docker compose" (with a space). Try:
+
+      docker-compose up -d
+
+  If that also fails, install or update Docker Desktop from:
+  https://docs.docker.com/get-docker/
+
+
+  Models are taking forever to download
+  --------------------------------------
+  The first startup downloads several GB of model data. On a slow
+  connection this can take a while. You can check progress with:
+
+      docker compose logs -f ollama-init
+
+  If the download stalls, stop everything (docker compose down) and
+  try again -- Ollama will resume where it left off.
+
+
+  OpenCode shows errors about connecting to Ollama
+  -------------------------------------------------
+  Make sure Ollama is actually running before launching OpenCode:
+
+      docker compose ps
+
+  The "ollama" service should show as "running". If it isn't, check
+  its logs for errors:
+
+      docker compose logs ollama
+
+
+  "could not select device driver" or GPU errors
+  ------------------------------------------------
+  This means Docker can't access your GPU. Either:
+    - Install the NVIDIA Container Toolkit inside WSL2
+      (see Prerequisites step 2b), or
+    - Use the default CPU mode (just don't include the GPU override
+      file when starting the stack).
+
+
+  GPU override is running but models still show "100% CPU"
+  ---------------------------------------------------------
+  Docker does NOT warn you if GPU passthrough fails -- it silently
+  falls back to CPU. To diagnose:
+
+    1. Check if the GPU is visible inside the container:
+
+           docker compose exec ollama nvidia-smi
+
+       If this fails with "not found", the NVIDIA Container Toolkit
+       is not installed in WSL2. See Prerequisites step 2b.
+
+    2. Check how the model is loaded:
+
+           docker compose exec ollama ollama ps
+
+       The PROCESSOR column tells you. "100% CPU" means the GPU is
+       not being used, even if you started with the GPU override.
+
+    3. After installing the toolkit, restart Docker Desktop, then:
+
+           docker compose down
+           docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+       Re-run the checks above to confirm.
+
+
+  VmmemWSL using too much memory (Windows)
+  -----------------------------------------
+  See "WINDOWS USERS -- WSL MEMORY TUNING" above. Create a
+  .wslconfig file to cap WSL memory, and restart WSL.
+
+
+  I want to add more models
+  --------------------------
+  You can pull additional models from the Ollama library at any
+  time. While Ollama is running:
+
+      docker compose exec ollama ollama pull <model-name>
+
+  For example:
+
+      docker compose exec ollama ollama pull mistral
+
+  Browse available models at: https://ollama.com/library
+
+  Note: adding larger models may require increasing the WSL memory
+  cap in .wslconfig and the OLLAMA_KEEP_ALIVE timeout in
+  docker-compose.yml.
+
+
+---------------------------------------------------------------------
+  SECURITY -- EXPOSING AGENTS OVER A NETWORK
+  (Telegram, webhooks, or anything else inbound from the internet)
+---------------------------------------------------------------------
+
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⢚⣿⣏⣭⣷⣿⣿⣶⣯⣽⡒⡤⢤⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⣪⣷⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣝⢦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⣯⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡝⢦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣮⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡞⣵⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣌⢢⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⡠⣺⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣟⢷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⣼⣵⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣾⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⡧⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡭⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⢰⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⣿⣟⠛⢿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⢸⢸⣿⣿⣿⣿⣿⣿⣿⡿⣿⠿⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁⣼⣿⣿⣷⡄⢹⣿⣿⣿⣿⣯⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠈⣿⣿⣿⣿⣿⣿⡟⢁⣾⣿⣿⡆⢻⣿⣿⣿⣿⣿⣿⣿⣿⣄⣿⣿⣿⣿⣇⣼⣿⣿⣿⣿⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⣧⣿⣿⣿⣿⣿⣧⣀⣿⣿⣿⣧⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠘⣧⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣬⣻⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⣸⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⣿⣸⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⢸⢷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⣏⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠘⣦⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡀⢸⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠈⣏⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠉⢀⣏⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣯⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⢃⣠⣾⡾⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⣮⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣟⡾⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣟⣻⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢳⣸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⣿⣷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⡷⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣧⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃⠀⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠀⠀⢿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠀⠀⠀⢸⣿⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣤⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠁⠀⠀⠀⠀⠀⢷⣷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⣸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠋⠀⠀⠀⠀⠀⠀⠀⠘⣿⣇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣏⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠛⠻⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢮⡘⠶⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠋⣹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⡄⠘⠶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣀⡖⠋⠀⣼⣿⣿⣿⣿⣿⡿⠛⠿⢿⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢳⡄⠀⠘⢓⣦⣀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣤⠞⠃⠀⠀⣸⣿⣿⣿⣿⣿⠏⠀⠀⠀⠀⠀⠀⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣷⠀⠀⠀⠈⠈⠳⢦⣀⠀⠀⠀
+⢠⠖⢺⣁⣈⣶⢀⣀⣀⣿⣿⣿⣿⣿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣹⡆⠀⣀⣀⣀⡆⢀⣈⠙⠲⣄
+
+
+        ! !   IF THIS PORT IS OPEN, YOUR MACHINE IS NOT YOURS   ! !
+
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+
+  agent-api on port 3777 has NO AUTHENTICATION.
+  Full-access presets expose run_command -- arbitrary shell.
+  Publish this port on the public internet and you have given
+  strangers a remote shell on your machine, with ./projects
+  mounted read-write and web_fetch available to exfiltrate
+  whatever they read.
+
+  This is not theoretical. Scanners find open ports in minutes.
+
+
+A Telegram bridge IS already shipped in ./telegram-bridge/ and is
+inert by default -- it lives behind the `telegram` compose profile
+and will not start with a plain `docker compose up`. The bridge was
+designed against the rules in this section. Activation steps are in
+telegram-bridge/README.md.
+
+If you plan to turn it on, or hook agent-api up to anything else
+that receives messages from outside your machine -- a webhook
+handler, an email forwarder, a Slack bot, etc. -- read this whole
+section FIRST.
+
+
+WHY :3777 MUST STAY OFF THE PUBLIC INTERNET
+
+The agent-api HTTP server (port 3777 in docker-compose.yml) has:
+
+  - No authentication. Any caller that can reach the port can POST
+    to /api/run and invoke any preset.
+  - Full-access presets include run_command -- that's arbitrary
+    shell execution inside the agent-api container.
+  - web_fetch can exfiltrate data: a compromised agent can POST
+    the contents of files it just read to any URL on the internet.
+  - The ./projects directory is mounted read-write, so write_file
+    can modify anything under there.
+
+Bind :3777 to localhost or the Docker internal network ONLY. Never
+publish it on a public interface, and never port-forward it through
+a router. If you need to reach it from outside the host, go through
+a bridge service that enforces auth and an allowlist -- never
+expose the raw API.
+
+
+TWO-TIER PRESET CONVENTION
+
+Presets in localagent/presets/ fall into two tiers.
+
+  Full-access presets (interactive local use only)
+
+  These have run_command and/or the full tool surface. Safe only
+  in trusted, supervised contexts: your OpenCode session, your
+  CLI, or Open WebUI running on your own machine. Do NOT invoke
+  these from any network-facing surface.
+
+    - coder
+    - job-scanner
+    - doc-processor
+    - git-commit
+
+  Sandboxed presets (safe-ish for a network-facing bridge)
+
+  run_command removed. Reduced tool surface. System prompt written
+  for unattended use with untrusted input.
+
+    - telegram-assistant
+
+If you build a Telegram bridge, Slack bridge, webhook handler, or
+any other surface that accepts messages from outside, it must ONLY
+dispatch sandboxed presets. Hard-code the preset name in the bridge
+code; never let the inbound message pick.
+
+
+TELEGRAM BRIDGE SECURITY CHECKLIST
+
+Before shipping any Telegram (or similar) bridge in front of
+agent-api, implement ALL of the following. This is a pre-flight
+list, not a list of nice-to-haves.
+
+  1. Sender allowlist. Maintain a list of Telegram user IDs
+     allowed to message the bot. Reject everyone else silently --
+     do not even echo an error, to avoid advertising the bot.
+
+  2. Preset hard-coded in the bridge. The bridge must only ever
+     POST with {"agent": "telegram-assistant", ...}. Do NOT let
+     the inbound message choose the preset. This is the single
+     most important rule on this list.
+
+  3. Rate limiting. Cap messages per sender per minute and per
+     hour. Otherwise a bad actor (or a stuck retry loop) can
+     drain Ollama throughput and rack up GPU time.
+
+  4. Dispatch log. Write every inbound message and outbound
+     reply to a log file for after-the-fact review. Include
+     sender ID, timestamp, prompt, and the agent's reply.
+
+  5. Localhost / Docker-internal binding. agent-api must NOT be
+     published on a public interface. Either:
+       - Bind :3777 to 127.0.0.1 on the host, or
+       - Run the bridge in the same Docker network and talk to
+         http://agent-api:3777 directly without publishing the
+         port at all.
+
+  6. Token hygiene. Never put the Telegram bot token (or any
+     other credential) into a preset's system prompt, default
+     prompt, or the inbound prompt passed to the agent. Keep
+     tokens in environment variables read by the bridge process
+     only.
+
+
+A NOTE ON PROMPT INJECTION
+
+Sandboxed presets REDUCE but do not ELIMINATE risk. Small local
+models (4B-class) are much easier to jailbreak than frontier
+models. A carefully crafted forwarded message or a malicious
+fetched web page can convince the model to:
+
+  - Write files to unexpected paths. The current write_file tool
+    does not enforce the inbox/reports sandbox at the tool layer
+    -- the system prompt is the only thing telling the model to
+    stay in bounds. (A sandboxed_write_file replacement with
+    realpath-based enforcement is planned as a follow-up.)
+  - Leak file contents via web_fetch (e.g. POSTing to an attacker
+    URL).
+  - Produce misleading replies that trick you into taking harmful
+    follow-up actions.
+
+The safe mental model: any agent reachable from a messaging
+surface is capable of READ / SUMMARIZE / REPORT work only. Do not
+wire it into anything with real-world consequences -- no sending
+emails on your behalf, no running deploys, no modifying shared
+configs, no making purchases, no touching anything that persists
+beyond the inbox/reports files. Treat its replies as drafts you
+review, not decisions you trust.
+
+
+---------------------------------------------------------------------
+  WHERE TO GO NEXT
+---------------------------------------------------------------------
+
+  GUIDE.md                    Deep dive on the LocalAgent system:
+                              the agent-api, how presets work, how
+                              tools (read_file, web_fetch, run_command,
+                              etc.) are wired up, and how to write
+                              your own preset.
+
+  telegram-bridge/README.md   Activation, configuration, kill switches,
+                              and memory/rate-limit behaviour for the
+                              Telegram bridge.
+
+  CLAUDE.md                   Context file read automatically by
+                              Claude-based tools (Claude Code, etc.)
+                              when you open this folder. Tells them
+                              to consult the graphify index first.
+
+  projects/                   Your workspace. OpenCode and agent-api
+                              both see this folder as /workspace/projects.
+                              Drop code, notes, or docs here and run
+                              `python -m graphify update .` from inside
+                              to keep the graph current.
+
+  localagent/presets/         Edit or add agent presets (the "persona"
+                              and tool surface for each agent). See
+                              GUIDE.md for the preset format.
+
+
+=====================================================================
+  That's it -- happy chatting!
+=====================================================================

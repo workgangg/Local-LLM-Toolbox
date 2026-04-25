@@ -1,0 +1,22 @@
+# GPU override — NVIDIA-equipped hosts (Windows Docker Desktop + WSL2, or Linux
+# with nvidia-container-toolkit). Verify `docker info` lists `nvidia` under Runtimes.
+#
+# Launch GPU-accelerated:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# CPU-only launch (universal, any Docker host) remains:
+#   docker compose up -d
+#
+# macOS (Metal) has no Docker GPU passthrough — run Ollama natively on Mac and
+# point Open WebUI at host.docker.internal:11434. AMD ROCm needs a different
+# device mapping than this overlay provides.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

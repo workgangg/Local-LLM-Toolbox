@@ -1,0 +1,131 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    ".opencode/plugins/graphify.js"
+  ],
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama",
+      "options": {
+        "baseURL": "http://ollama:11434/v1"
+      },
+      "models": {
+        "gemma4:e4b": {
+          "name": "Gemma 4 E4B",
+          "tools": true
+        },
+        "grm-2.5": {
+          "name": "GRM 2.5 4B",
+          "tools": true
+        }
+      }
+    }
+  },
+  "agent": {
+    "assistant": {
+      "description": "Personal assistant — notes, tasks, research, drafting",
+      "mode": "primary",
+      "model": "ollama/gemma4:e4b",
+      "prompt": "{file:./prompts/assistant.txt}",
+      "tools": {
+        "read": true,
+        "write": true,
+        "edit": true,
+        "glob": true,
+        "grep": true,
+        "bash": true,
+        "todowrite": true,
+        "webfetch": true,
+        "mempalace_init": false,
+        "mempalace_mine": false,
+        "mempalace_remember": false,
+        "mempalace_search": false,
+        "mempalace_status": false,
+        "mempalace_wakeup": false,
+        "task": false,
+        "question": false
+      }
+    },
+    "build": {
+      "mode": "primary",
+      "model": "ollama/gemma4:e4b",
+      "prompt": "{file:./prompts/build.txt}",
+      "tools": {
+        "read": true,
+        "write": true,
+        "edit": true,
+        "glob": true,
+        "grep": true,
+        "bash": true,
+        "todowrite": true,
+        "webfetch": true,
+        "mempalace_init": false,
+        "mempalace_mine": false,
+        "mempalace_remember": false,
+        "mempalace_search": false,
+        "mempalace_status": false,
+        "mempalace_wakeup": false,
+        "task": false,
+        "question": false
+      }
+    },
+    "commit": {
+      "description": "Generate a commit message from the current diff",
+      "mode": "primary",
+      "model": "ollama/gemma4:e4b",
+      "prompt": "{file:./prompts/commit.txt}",
+      "tools": {
+        "bash": true,
+        "read": true,
+        "grep": true,
+        "write": false,
+        "edit": false,
+        "glob": false,
+        "todowrite": false,
+        "webfetch": false,
+        "task": false,
+        "question": false,
+        "mempalace_init": false,
+        "mempalace_mine": false,
+        "mempalace_remember": false,
+        "mempalace_search": false,
+        "mempalace_status": false,
+        "mempalace_wakeup": false
+      }
+    },
+    "review": {
+      "description": "Read-only code review — no file modifications",
+      "mode": "primary",
+      "model": "ollama/gemma4:e4b",
+      "prompt": "{file:./prompts/review.txt}",
+      "tools": {
+        "read": true,
+        "glob": true,
+        "grep": true,
+        "bash": true,
+        "write": false,
+        "edit": false,
+        "todowrite": false,
+        "webfetch": false,
+        "task": false,
+        "question": false,
+        "mempalace_init": false,
+        "mempalace_mine": false,
+        "mempalace_remember": false,
+        "mempalace_search": false,
+        "mempalace_status": false,
+        "mempalace_wakeup": false
+      }
+    },
+    "mempalace": {
+      "mode": "subagent"
+    },
+    "memory": {
+      "mode": "subagent"
+    },
+    "plan": {
+      "mode": "subagent"
+    }
+  }
+}

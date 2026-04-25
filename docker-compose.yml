@@ -1,0 +1,246 @@
+services:
+
+  # ── Ollama — Local LLM Backend ─────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: Ollama-Backend
+    restart: unless-stopped
+    labels:
+      com.localllm.name: "Ollama Backend"
+      com.localllm.description: "Local LLM inference server"
+      com.localllm.role: "backend"
+    ports:
+      - "11434:11434"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    environment:
+      # Unload models from RAM after 5 min idle. When a new request arrives
+      # (including from the Telegram bridge) Ollama reloads the model
+      # automatically — the first reply is slower, but the bot never ignores
+      # the user. Raise this if you have the RAM and want instant replies.
+      - OLLAMA_KEEP_ALIVE=5m
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/11434"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    volumes:
+      - ollama-models:/root/.ollama
+
+  # ── Model Loader — Pulls models on first startup ───────────────
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: Ollama-Model-Loader
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    labels:
+      com.localllm.name: "Model Loader"
+      com.localllm.description: "One-shot init — pulls Gemma 4 and imports GRM-2.5 into Ollama"
+      com.localllm.role: "init"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for Ollama to be ready..."
+        until ollama list > /dev/null 2>&1; do
+          sleep 2
+        done
+        echo "Ollama is up. Checking models..."
+        if ! ollama list | grep -q "gemma4:e4b"; then
+          echo "Pulling gemma4:e4b..."
+          ollama pull gemma4:e4b
+        else
+          echo "gemma4:e4b already present — skipping."
+        fi
+        if ! ollama list | grep -q "grm-2.5"; then
+          echo "Installing curl (required for GGUF download)..."
+          apt-get update -qq && apt-get install -y --no-install-recommends curl >/dev/null
+          echo "Downloading GRM-2.5 pre-quantized GGUF (i1-Q4_K_M imatrix, ~2.4 GB)..."
+          GGUF_URL="https://huggingface.co/mradermacher/GRM-2.5-i1-GGUF/resolve/main/GRM-2.5.i1-Q4_K_M.gguf"
+          curl -fL -o /tmp/grm-2.5.gguf "$$GGUF_URL"
+          printf 'FROM /tmp/grm-2.5.gguf\n' > /tmp/Modelfile
+          echo "Importing into Ollama..."
+          ollama create grm-2.5 -f /tmp/Modelfile
+          rm -f /tmp/grm-2.5.gguf /tmp/Modelfile
+          echo "GRM-2.5 imported successfully."
+        else
+          echo "grm-2.5 already present — skipping."
+        fi
+        echo "Applying optimized context windows..."
+        printf 'FROM gemma4:e4b\nPARAMETER num_ctx 16384\nPARAMETER num_gpu 99\n' > /tmp/Modelfile && ollama create gemma4:e4b -f /tmp/Modelfile
+        # Short-context variant for chat bots (Telegram). Same weights, smaller
+        # KV cache -> faster warm inference and lower VRAM. OpenCode / Open
+        # WebUI keep using gemma4:e4b (16k) for coding + long-form work.
+        printf 'FROM gemma4:e4b\nPARAMETER num_ctx 4096\nPARAMETER num_gpu 99\n' > /tmp/Modelfile && ollama create gemma4:e4b-chat -f /tmp/Modelfile
+        if ollama list | grep -q "grm-2.5"; then
+          ollama create grm-2.5 -f /tmp/Modelfile.grm25
+        fi
+        echo "Model check complete."
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      # `:z` is an SELinux relabel hint — required on Fedora/RHEL/openSUSE,
+      # silently ignored on macOS, Windows, and Linux without SELinux.
+      # Lowercase `z` = shared across containers (correct here since multiple
+      # services see ./projects). Uppercase `Z` would be private-to-one-container.
+      - ./Modelfile.grm25:/tmp/Modelfile.grm25:ro,z
+
+  # ── Agent API — HTTP endpoint for programmatic agent dispatch ──
+  # Always running. Any tool, script, or orchestrator can POST to it.
+  agent-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: LocalAgent-API
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    labels:
+      com.localllm.name: "Agent API"
+      com.localllm.description: "HTTP API for dispatching agents to Ollama"
+      com.localllm.role: "agent-api"
+    entrypoint: ["node", "/workspace/localagent/server.mjs"]
+    # Bound to 127.0.0.1 ONLY on the host, plus reachable over the Docker
+    # network as `http://agent-api:3777` (used by the Telegram bridge).
+    # - localhost curl from your own machine works (examples in GUIDE.md).
+    # - The port is NOT reachable from your LAN, Wi-Fi, or the public
+    #   internet. Do NOT change "127.0.0.1:3777:3777" to "3777:3777" or
+    #   "0.0.0.0:3777:3777" — that would expose the agent API (including
+    #   the `coder` preset's run_command) to anyone on the network.
+    #   See SETUP.txt → SECURITY.
+    ports:
+      - "127.0.0.1:3777:3777"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - AGENT_PORT=3777
+      - AGENT_CWD=/workspace/projects
+    volumes:
+      - ./projects:/workspace/projects:z
+
+  # ── OpenCode — Interactive AI Coding Agent ─────────────────────
+  # Usage: docker compose run --rm opencode
+  opencode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: OpenCode-Agent
+    profiles:
+      - cli
+    depends_on:
+      ollama:
+        condition: service_healthy
+    labels:
+      com.localllm.name: "OpenCode Agent"
+      com.localllm.description: "Interactive AI coding CLI"
+      com.localllm.role: "agent"
+    tty: true
+    stdin_open: true
+    working_dir: /workspace/projects
+    volumes:
+      - ./opencode.json:/workspace/projects/opencode.json:ro,z
+      - ./prompts:/workspace/projects/prompts:ro,z
+      - ./projects:/workspace/projects:z
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - OPENAI_TIMEOUT=120000
+
+  # ── Open WebUI — Chat Interface ────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: Open-WebUI
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    labels:
+      com.localllm.name: "Open WebUI"
+      com.localllm.description: "ChatGPT-style web interface for Ollama"
+      com.localllm.role: "frontend"
+    ports:
+      - "3000:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_AUTH=false
+    volumes:
+      - open-webui-data:/app/backend/data
+
+  # ── Graphify — Knowledge Graph Generator ────────────────────────
+  # Usage: docker compose run --rm graphify
+  # Builds a queryable knowledge graph from your projects folder.
+  graphify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Graphify
+    profiles:
+      - cli
+    labels:
+      com.localllm.name: "Graphify"
+      com.localllm.description: "Turn code and docs into a queryable knowledge graph"
+      com.localllm.role: "tool"
+    tty: true
+    stdin_open: true
+    working_dir: /workspace/projects
+    entrypoint: ["graphify"]
+    volumes:
+      - ./projects:/workspace/projects:z
+
+  # ── Telegram Bridge — Sandboxed messaging gateway ──────────────
+  # INERT BY DEFAULT. Gated behind the `telegram` compose profile.
+  # Activation:
+  #   1. cp telegram-bridge/.env.example telegram-bridge/.env
+  #   2. Fill TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS
+  #   3. docker compose --profile telegram up -d telegram-bridge
+  # Reaches agent-api over the Docker network — does NOT require
+  # :3777 to be published on the host. See SETUP.txt SECURITY
+  # section before activating.
+  telegram-bridge:
+    build:
+      context: ./telegram-bridge
+      dockerfile: Dockerfile
+    container_name: Telegram-Bridge
+    profiles:
+      - telegram
+    restart: unless-stopped
+    depends_on:
+      - agent-api
+    labels:
+      com.localllm.name: "Telegram Bridge"
+      com.localllm.description: "Sandboxed Telegram messaging bridge — uses telegram-assistant preset"
+      com.localllm.role: "bridge"
+    env_file:
+      - ./telegram-bridge/.env
+    environment:
+      - AGENT_URL=http://agent-api:3777/api/run
+    volumes:
+      - ./telegram-bridge:/workspace/telegram-bridge:z
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  ollama-models:
+  open-webui-data:
