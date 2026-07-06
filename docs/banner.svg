@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" role="img" aria-labelledby="bt bd">
+  <title id="bt">Local LLM Toolbox</title>
+  <desc id="bd">A great starting point — 100% local, private, zero dollars per month. Illustration of a desktop computer sending a signal to a phone.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B0E14"/>
+      <stop offset="1" stop-color="#121926"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#E8B44C" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#E8B44C" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E8B44C" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#E8B44C" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- card -->
+  <rect x="1" y="1" width="1278" height="318" rx="20" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1278" height="318" rx="20" fill="none" stroke="#212B3B" stroke-width="1.5"/>
+
+  <!-- soft glow behind the motif -->
+  <circle cx="1030" cy="150" r="230" fill="url(#glow)"/>
+
+  <!-- ── left: wordmark ─────────────────────────────────────────── -->
+  <text x="96" y="142" font-family="Georgia, 'Times New Roman', serif" font-size="74"
+        fill="#F2EFE8" letter-spacing="-1">Local LLM Toolbox</text>
+
+  <line x1="98" y1="170" x2="410" y2="170" stroke="url(#rule)" stroke-width="1.5"/>
+
+  <text x="96" y="216" font-family="Georgia, 'Times New Roman', serif" font-size="34"
+        font-style="italic" fill="#E8B44C">a great starting point</text>
+
+  <text x="96" y="266" font-family="Consolas, Menlo, 'Courier New', monospace" font-size="18"
+        fill="#6B7484" letter-spacing="0.5">100% local&#160;&#160;·&#160;&#160;private&#160;&#160;·&#160;&#160;$0/month</text>
+
+  <!-- ── right: the signal — your PC, your phone ────────────────── -->
+  <g stroke="#4A5464" stroke-width="2" fill="none" stroke-linecap="round">
+    <!-- desktop -->
+    <rect x="898" y="118" width="96" height="64" rx="8"/>
+    <line x1="930" y1="196" x2="962" y2="196"/>
+    <line x1="946" y1="182" x2="946" y2="196"/>
+    <!-- phone -->
+    <rect x="1146" y="128" width="38" height="66" rx="9"/>
+    <line x1="1158" y1="184" x2="1172" y2="184"/>
+  </g>
+
+  <!-- model light on the desktop -->
+  <rect x="912" y="132" width="10" height="10" rx="2" fill="#E8B44C"/>
+  <rect x="912" y="150" width="42" height="3" rx="1.5" fill="#2A3547"/>
+  <rect x="912" y="160" width="28" height="3" rx="1.5" fill="#2A3547"/>
+
+  <!-- the arc: pc → phone -->
+  <path d="M 1000 138 Q 1070 84 1160 122" fill="none" stroke="#E8B44C" stroke-opacity="0.65"
+        stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 9"/>
+  <circle cx="1072" cy="103" r="8" fill="#E8B44C" fill-opacity="0.18"/>
+  <circle cx="1072" cy="103" r="3.5" fill="#E8B44C"/>
+
+  <!-- reply ticks above the phone -->
+  <g stroke="#E8B44C" fill="none" stroke-width="2" stroke-linecap="round">
+    <path d="M 1196 116 A 14 14 0 0 1 1204 126" stroke-opacity="0.7"/>
+    <path d="M 1204 106 A 26 26 0 0 1 1218 124" stroke-opacity="0.35"/>
+  </g>
+</svg>

@@ -1,0 +1,16 @@
+# Normalize line endings so fresh clones behave identically on every OS.
+# Files that get bind-mounted into Linux containers (Modelfiles, prompts,
+# configs) or executed there (scripts, source) MUST stay LF — CRLF inside
+# a mounted Modelfile corrupts template and stop-token definitions.
+* text=auto
+*.md text
+*.txt text
+*.mjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+Modelfile* text eol=lf
+prompts/*.txt text eol=lf
