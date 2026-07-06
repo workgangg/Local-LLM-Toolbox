@@ -1,0 +1,18 @@
+node_modules/
+
+# Local machine config — never commit
+.env
+telegram-bridge/.env
+
+# Per-machine GPU override (copied from docker-compose.gpu.yml)
+docker-compose.override.yml
+
+# Obsidian editor state — local layout, last-opened files, plugin list
+.obsidian/
+
+# Empty mount-target placeholders Docker recreates at runtime
+projects/opencode.json
+projects/prompts/
+
+# One-off helpers
+COMMIT_MESSAGE.txt

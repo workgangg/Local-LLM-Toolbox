@@ -1,0 +1,42 @@
+# GPU override — NVIDIA-equipped hosts.
+#
+# RECOMMENDED SETUP (one-time): copy this file to docker-compose.override.yml,
+# which Docker Compose merges automatically on EVERY command:
+#
+#   Windows:      copy docker-compose.gpu.yml docker-compose.override.yml
+#   macOS/Linux:  cp docker-compose.gpu.yml docker-compose.override.yml
+#
+# After that, plain `docker compose up -d`, `docker compose run --rm opencode`,
+# etc. are all GPU-enabled — no extra flags to remember, no way to silently
+# recreate the stack CPU-only by forgetting one. (The override file is
+# gitignored; it's a per-machine choice.)
+#
+# The explicit two-flag form still works if you prefer it, but then EVERY
+# compose command needs both flags:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Prerequisites differ by platform — see SETUP.txt:
+#   - Docker Desktop (Windows/WSL2): a current NVIDIA Windows driver is ALL
+#     you need. Do NOT install anything inside WSL2. Note that `docker info`
+#     will NOT list an `nvidia` runtime on Docker Desktop even when GPU
+#     support works — the smoke test in SETUP.txt is the real check.
+#   - Native Linux Docker Engine: install nvidia-container-toolkit on the
+#     host, run `sudo nvidia-ctk runtime configure --runtime=docker`, and
+#     restart Docker.
+#
+# CPU-only launch (universal, any Docker host) remains:
+#   docker compose up -d
+#
+# macOS (Metal) has no Docker GPU passthrough — run Ollama natively on Mac and
+# point Open WebUI at host.docker.internal:11434. AMD ROCm needs a different
+# device mapping than this overlay provides.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

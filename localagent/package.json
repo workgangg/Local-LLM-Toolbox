@@ -1,0 +1,13 @@
+{
+  "name": "localagent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Offline-first agent runner for Ollama — local alternative to cloud coding CLIs",
+  "bin": {
+    "localagent": "./cli.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "cli": "node cli.mjs"
+  }
+}
