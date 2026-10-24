@@ -5,7 +5,9 @@ services:
     # Pinned to a known-good version so every machine runs the same stack.
     # To upgrade: bump the tag here (and in ollama-init below), then
     # `docker compose pull && docker compose up -d`.
-    image: ollama/ollama:0.20.3
+    # Must be 0.40 or newer: the Ollama registry now serves gemma4 in the
+    # 0.40+ manifest format, and older versions fail the pull with HTTP 412.
+    image: ollama/ollama:0.40.9
     restart: unless-stopped
     labels:
       com.localllm.name: "Ollama Backend"
@@ -48,7 +50,7 @@ services:
 
   # ── Model Loader — Pulls models on first startup ───────────────
   ollama-init:
-    image: ollama/ollama:0.20.3
+    image: ollama/ollama:0.40.9
     depends_on:
       ollama:
         condition: service_healthy
