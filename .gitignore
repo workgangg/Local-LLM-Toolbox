@@ -13,6 +13,3 @@ docker-compose.override.yml
 # Empty mount-target placeholders Docker recreates at runtime
 projects/opencode.json
 projects/prompts/
-
-# One-off helpers
-COMMIT_MESSAGE.txt

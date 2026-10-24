@@ -73,7 +73,6 @@ docker compose down -v
 - **[COLLEGE_USE_CASES.md](COLLEGE_USE_CASES.md)** — Worked examples with copy-paste prompts: study guides from lecture notes, essay critique, programming homework with `coder`, job-listing ranking, literature synthesis, and more. The best first stop after setup.
 - **[SETUP.txt](SETUP.txt)** — Full installation walkthrough. Prerequisites, GPU setup (Windows/WSL2 + Linux), Fedora / RHEL / Podman notes, WSL memory tuning, troubleshooting, resource management, and the Telegram-bridge security checklist.
 - **[GUIDE.md](GUIDE.md)** — Deep dive on the LocalAgent system: the agent-api, how presets are structured, how the tools (`read_file`, `web_fetch`, `run_command`, etc.) are wired up, and how to write your own preset.
-- **[CLAUDE.md](CLAUDE.md)** — Context file that Claude-based tools read automatically when they open the project folder. You don't usually read this directly.
 
 ## Distribution
 
@@ -104,7 +103,6 @@ Dockerfile                 OpenCode + agent-api image
 opencode.json              Provider and model configuration
 SETUP.txt                  Full setup guide (prerequisites, GPU, troubleshooting, security)
 GUIDE.md                   LocalAgent deep-dive (agent-api, presets, tools)
-CLAUDE.md                  Project context read by Claude-based tools
 .opencode/                 OpenCode plugin + tool configuration
 localagent/                Agent-api source + presets
 telegram-bridge/           Optional Telegram bridge (inert by default)

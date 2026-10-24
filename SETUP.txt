@@ -843,10 +843,6 @@ review, not decisions you trust.
                               and memory/rate-limit behaviour for the
                               Telegram bridge.
 
-  CLAUDE.md                   Context file read automatically by
-                              Claude-based tools (Claude Code, etc.)
-                              when you open this folder.
-
   projects/                   Your workspace. OpenCode and agent-api
                               both see this folder as /workspace/projects.
                               Drop code, notes, or docs here.
